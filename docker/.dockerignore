@@ -1,0 +1,4 @@
+# macOS metadata — these match the Ascend-cann-*.run globs in the dockerfile
+# and would make the wildcard expand to two files, breaking the install.
+._*
+.DS_Store

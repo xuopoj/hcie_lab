@@ -1,0 +1,17 @@
+# Credentials — never commit
+.env
+.env.*
+!.env.example
+
+# CANN .run installers (~3.4 GB) — supplied out of band, see README.md
+docker/packages/
+
+# Persistent lab workspace: models, datasets, cloned code (~150 GB)
+workspace/
+models/
+assets/
+
+.DS_Store
+**/__pycache__/
+*.pyc
+.ipynb_checkpoints/
