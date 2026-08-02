@@ -9,9 +9,56 @@
 | Item | Status |
 |---|---|
 | Container-layer download bug | **Fixed**, pushed as `91ba63e` |
-| lab01 assets | **Downloaded** and verified persistent (90 MB) |
-| lab02–lab10 assets | **Not downloaded** — blocked on disk space |
-| WSL `hfd` failure | **Open** — cause not yet identified |
+| lab01 assets | **Downloaded**, packaged (53 MB zip) |
+| lab02 assets | **In progress** — see "CDN 403s" below |
+| lab03–lab10 assets | Queued behind lab02 in `07-package-all.sh` |
+| WSL `hfd` failure | **Open** — bypassed by packaging on the Mac |
+
+## Route change (2026-08-02)
+
+Downloading directly on WSL kept failing, so assets are now downloaded on the
+Mac, zipped one lab at a time, and published to ModelScope; the lab hosts pull
+from there. Scripts: `05-package-lab.sh`, `06-upload-modelscope.sh`,
+`07-package-all.sh`.
+
+Stage on a **case-sensitive** filesystem. The T7 is exFAT and case-insensitive,
+where files differing only in case silently overwrite each other:
+
+```bash
+hdiutil create -type SPARSEBUNDLE -fs "Case-sensitive APFS" -size 400g \
+    -volname HCIE /Volumes/T7/hcie-stage.sparsebundle
+hdiutil attach /Volumes/T7/hcie-stage.sparsebundle
+export HCIE_STAGE_ROOT=/Volumes/HCIE/stage HCIE_PKG=/Volumes/T7/hcie-packages
+```
+
+`05-package-lab.sh` refuses to run on a case-insensitive stage.
+
+## CDN 403s and network drops (the lab02 failures)
+
+Two distinct failures, both now handled in `hf_download`:
+
+1. **Expiring signed URLs.** `hfd` resolves every CDN link upfront, but
+   hf-mirror redirects to CloudFront URLs that expire in ~15 min. On a 12.5 GB
+   repo the later shards `403` before aria2c reaches them. lab02 died at
+   6.5/12.49 GB with `status=403`; the `Expires` timestamp in the failing URL
+   had passed three minutes earlier.
+2. **Transient VPN/network drops.** `curl: (35) SSL_ERROR_SYSCALL` to
+   hf-mirror. The first retry loop fired all 8 attempts in seconds, so a brief
+   outage consumed every one and gained no bytes.
+
+`hf_download` now retries 8 times with a delay doubling from 30s (cap 5 min),
+spanning ~22 minutes. `HCIE_HF_TRIES` / `HCIE_HF_DELAY` override.
+
+> Traffic here runs over a VPN (`utun6`, DNS in 198.18/16). Intermittent drops
+> should be expected, not treated as a script bug.
+
+## Verified working
+
+- **`cp -r` in lab02** — the hardcoded
+  `PyTorch/built-in/foundation/ChatGLM2-6B` path still exists on Gitee. The
+  stub harness could never reach this; the real clone (94,238 files) passed.
+- **The stamp fix** — the failed 6.5 GB download was *not* marked complete, so
+  the retry resumed instead of skipping a truncated model.
 
 ---
 
