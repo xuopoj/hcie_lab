@@ -80,8 +80,13 @@ hf_download() {
     [[ -x "$HFD" ]] || { curl -fL -o "$HFD" "$HF_ENDPOINT/hfd/hfd.sh"; chmod +x "$HFD"; }
     log "hf $repo -> $dest"
     mkdir -p "$dest"
-    (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x 4 --local-dir "$dest")
-    touch "$dest/.hcie-complete"
+    # Only stamp on success — a stamped partial download is skipped forever after.
+    if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x 4 --local-dir "$dest"); then
+        touch "$dest/.hcie-complete"
+    else
+        log "FAILED $repo — not stamping; re-run to resume"
+        return 1
+    fi
 }
 
 # The MindFormers labs all share this one archive.
