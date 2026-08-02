@@ -80,13 +80,20 @@ hf_download() {
     [[ -x "$HFD" ]] || { curl -fL -o "$HFD" "$HF_ENDPOINT/hfd/hfd.sh"; chmod +x "$HFD"; }
     log "hf $repo -> $dest"
     mkdir -p "$dest"
-    # Only stamp on success — a stamped partial download is skipped forever after.
-    if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x 4 --local-dir "$dest"); then
-        touch "$dest/.hcie-complete"
-    else
-        log "FAILED $repo — not stamping; re-run to resume"
-        return 1
-    fi
+    # hfd resolves every signed CDN URL upfront, but hf-mirror redirects to
+    # CloudFront links that expire in ~15 min. On a multi-GB repo the later
+    # files 403 before aria2c reaches them, so retry: each pass re-resolves
+    # fresh URLs and aria2c resumes the partial shards from its .aria2 files.
+    local tries="${HCIE_HF_TRIES:-8}" i
+    for (( i = 1; i <= tries; i++ )); do
+        if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x 4 --local-dir "$dest"); then
+            touch "$dest/.hcie-complete"
+            return 0
+        fi
+        [[ $i -lt $tries ]] && log "attempt $i/$tries failed (expired CDN links?) — resuming"
+    done
+    log "FAILED $repo after $tries attempts — not stamping; re-run to resume"
+    return 1
 }
 
 # The MindFormers labs all share this one archive.
