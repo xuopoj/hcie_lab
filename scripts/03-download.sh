@@ -80,15 +80,19 @@ hf_download() {
     [[ -x "$HFD" ]] || { curl -fL -o "$HFD" "$HF_ENDPOINT/hfd/hfd.sh"; chmod +x "$HFD"; }
     log "hf $repo -> $dest"
     mkdir -p "$dest"
-    # hfd resolves every signed CDN URL upfront, but hf-mirror redirects to
-    # CloudFront links that expire in ~15 min. On a multi-GB repo the later
-    # files 403 before aria2c reaches them, so retry: each pass re-resolves
-    # fresh URLs and aria2c resumes the partial shards from its .aria2 files.
+    # hf-mirror redirects to CloudFront URLs whose policy pins a *byte range*
+    # ("ByteRange":{"ExpectedHeader":"bytes=N-M"}) and expires in ~15 min. With
+    # multiple connections per file aria2c splits into ranges, and on resume the
+    # freshly signed URL no longer matches the range it asks for -> 403, and the
+    # partial file is discarded. Shards then ping-pong in size and never finish.
+    #
+    # -x1/-s1 forces one continuous request per file, which resumes cleanly from
+    # whatever is already on disk. Slower per file, but it actually converges.
     # Back off between attempts: a transient network/VPN drop otherwise burns
     # every retry in seconds and the whole lab fails for a blip. Capped at 5 min.
     local tries="${HCIE_HF_TRIES:-8}" i delay="${HCIE_HF_DELAY:-30}"
     for (( i = 1; i <= tries; i++ )); do
-        if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x 4 --local-dir "$dest"); then
+        if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x "${HCIE_HF_CONN:-1}" --local-dir "$dest"); then
             touch "$dest/.hcie-complete"
             return 0
         fi
