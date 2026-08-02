@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-# Diagnose hfd's "failed to open the file .hfd/download.log". Run INSIDE the
-# container, with the workspace mounted:
+# Diagnose hfd's "failed to open the file .hfd/download.log".
 #
+# On a host (no container):
+#   HCIE_WS="$HOME/hcie-workspace" bash scripts/diag-hfd.sh
+#
+# Inside the container, with the workspace mounted:
 #   docker run --rm -v "$PWD/workspace:/workspace" \
 #     -v "$PWD/scripts/diag-hfd.sh:/tmp/diag.sh:ro" \
 #     hcie/lab:8.0rc1-910b bash /tmp/diag.sh
 #
 # See docs/superpowers/plans/2026-08-02-download-status.md for how to read it.
+WS="${HCIE_WS:-/workspace}"
+
 echo "===== identity / mount ====="
 id
-echo "workspace mount:"; df -hT /workspace 2>/dev/null | tail -2
-echo "free space:"; df -h /workspace | tail -1
-echo "read-only? "; touch /workspace/.wtest 2>&1 && echo "writable" && rm -f /workspace/.wtest
+echo "workspace: $WS"
+df -hT "$WS" 2>/dev/null | tail -2 || df -h "$WS" | tail -2
+echo "read-only? "; touch "$WS/.wtest" 2>&1 && echo "writable" && rm -f "$WS/.wtest"
 
 echo
 echo "===== models dir state ====="
-MODELS=/workspace/models
+MODELS="$WS/models"
 ls -lad "$MODELS" 2>&1
 echo "--- existing per-repo dirs and their .hfd ---"
 for d in "$MODELS"/*/; do
