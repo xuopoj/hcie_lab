@@ -80,24 +80,40 @@ hf_download() {
     [[ -x "$HFD" ]] || { curl -fL -o "$HFD" "$HF_ENDPOINT/hfd/hfd.sh"; chmod +x "$HFD"; }
     log "hf $repo -> $dest"
     mkdir -p "$dest"
-    # hf-mirror redirects to CloudFront URLs whose policy pins a *byte range*
-    # ("ByteRange":{"ExpectedHeader":"bytes=N-M"}) and expires in ~15 min. With
-    # multiple connections per file aria2c splits into ranges, and on resume the
-    # freshly signed URL no longer matches the range it asks for -> 403, and the
-    # partial file is discarded. Shards then ping-pong in size and never finish.
+    # hfd deletes any needed file that has no .aria2 control file, on the theory
+    # that -c cannot fix it ("drop a wrong-size copy", hfd.sh ~line 275). But
+    # aria2c REMOVES the control file when a file completes — so on the next
+    # pass every finished shard looks unfixable and is deleted. On a 12.5 GB
+    # repo that never finishes in one pass, each retry destroys the previous
+    # pass's completed files: lab02's shards went 3.7 -> 7.5 -> 10 -> 6.0 -> 4.2 GB
+    # and two completed 1.9 GB shards came back as ~36 MB.
     #
-    # -x1/-s1 forces one continuous request per file, which resumes cleanly from
-    # whatever is already on disk. Slower per file, but it actually converges.
-    # Back off between attempts: a transient network/VPN drop otherwise burns
-    # every retry in seconds and the whole lab fails for a blip. Capped at 5 min.
+    # So: park completed files outside the download dir before each pass and put
+    # them back afterwards. hfd then sees them as missing (it re-lists, but the
+    # manifest sizes match what we restore) and never deletes them.
     local tries="${HCIE_HF_TRIES:-8}" i delay="${HCIE_HF_DELAY:-30}"
+    local park="$dest/.hcie-done"
     for (( i = 1; i <= tries; i++ )); do
-        if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x "${HCIE_HF_CONN:-1}" --local-dir "$dest"); then
+        # Move finished files (no .aria2 companion) out of harm's way.
+        mkdir -p "$park"
+        while IFS= read -r f; do
+            [[ -e "$f.aria2" ]] && continue
+            mv "$f" "$park/" 2>/dev/null
+        done < <(find "$dest" -maxdepth 1 -type f ! -name '.*' 2>/dev/null)
+
+        (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x "${HCIE_HF_CONN:-1}" --local-dir "$dest")
+        local rc=$?
+
+        # Restore them before deciding whether we are done.
+        find "$park" -maxdepth 1 -type f -exec mv {} "$dest/" \; 2>/dev/null
+        rmdir "$park" 2>/dev/null
+
+        if [[ $rc -eq 0 ]] && ! find "$dest" -maxdepth 1 -name '*.aria2' | grep -q .; then
             touch "$dest/.hcie-complete"
             return 0
         fi
         if [[ $i -lt $tries ]]; then
-            log "attempt $i/$tries failed (expired links or network drop) — retrying in ${delay}s"
+            log "attempt $i/$tries incomplete — retrying in ${delay}s"
             sleep "$delay"
             delay=$(( delay * 2 )); [[ $delay -gt 300 ]] && delay=300
         fi
