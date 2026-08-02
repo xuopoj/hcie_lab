@@ -85,7 +85,17 @@ hf_download() {
 }
 
 # The MindFormers labs all share this one archive.
+# entrypoint.sh symlinks the baked /opt/mindformers into $CODE. Writing lab assets
+# through that symlink puts them in the container layer, not the workspace mount,
+# so they vanish on restart. Replace it with a real copy first.
 mindformers_zip() {
+    if [[ -L "$CODE/mindformers" ]]; then
+        log "materialising mindformers from $(readlink "$CODE/mindformers")"
+        mkdir -p "$CODE/mindformers.tmp"
+        cp -a "$(readlink -f "$CODE/mindformers")/." "$CODE/mindformers.tmp/"
+        rm -f "$CODE/mindformers"
+        mv "$CODE/mindformers.tmp" "$CODE/mindformers"
+    fi
     fetch_zip "$OBS/mindformers.zip" "$CODE" "mindformers"
 }
 
