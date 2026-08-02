@@ -41,12 +41,24 @@ for d in "$MODELS"/*/; do
     [[ -e "$h" ]] || continue
     found=1
     echo "--- $d"
+    echo "    .hfd:        $(ls -lad "$h" 2>&1)"
+    [[ -e "$l" ]] && echo "    download.log: $(ls -lad "$l" 2>&1)" || echo "    download.log: (absent)"
+    # -w can lie under root or with ACLs, so try the append hfd actually performs.
+    # Only probe an existing file — never create one, or we alter what we inspect.
+    wr=yes
+    if [[ -f "$l" ]]; then
+        ( : >> "$l" ) 2>/dev/null || wr=NO
+        echo "    append works: $wr"
+    fi
     if   [[ -f "$h" ]]; then echo "    VERDICT: .hfd is a FILE, not a directory  -> rm -f '$h'"
     elif [[ ! -d "$h" ]]; then echo "    VERDICT: .hfd exists but is not a directory -> rm -rf '$h'"
-    elif [[ ! -w "$h" ]]; then echo "    VERDICT: .hfd dir NOT writable by $(id -un) -> $(ls -lad "$h")"
+    elif [[ ! -w "$h" ]]; then echo "    VERDICT: .hfd dir NOT writable by $(id -un) -> chmod u+w '$h'"
     elif [[ -d "$l" ]]; then echo "    VERDICT: download.log is a DIRECTORY -> rm -rf '$l'"
-    elif [[ -e "$l" && ! -w "$l" ]]; then echo "    VERDICT: download.log NOT writable -> $(ls -la "$l")"
-    else echo "    looks fine: $(ls -lad "$h")"; fi
+    elif [[ -e "$l" && "${wr:-yes}" == NO ]]; then
+        echo "    VERDICT: download.log is a regular file that cannot be written"
+        echo "             owner=$(stat -c '%U:%G mode=%a' "$l" 2>/dev/null || stat -f '%Su:%Sg mode=%Lp' "$l") you=$(id -un)"
+        echo "             -> rm -f '$l'    (hfd recreates it)"
+    else echo "    looks usable"; fi
 done
 [[ $found -eq 0 ]] && echo "(no existing .hfd anywhere under $MODELS)"
 
