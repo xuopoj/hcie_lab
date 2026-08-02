@@ -84,13 +84,19 @@ hf_download() {
     # CloudFront links that expire in ~15 min. On a multi-GB repo the later
     # files 403 before aria2c reaches them, so retry: each pass re-resolves
     # fresh URLs and aria2c resumes the partial shards from its .aria2 files.
-    local tries="${HCIE_HF_TRIES:-8}" i
+    # Back off between attempts: a transient network/VPN drop otherwise burns
+    # every retry in seconds and the whole lab fails for a blip. Capped at 5 min.
+    local tries="${HCIE_HF_TRIES:-8}" i delay="${HCIE_HF_DELAY:-30}"
     for (( i = 1; i <= tries; i++ )); do
         if (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x 4 --local-dir "$dest"); then
             touch "$dest/.hcie-complete"
             return 0
         fi
-        [[ $i -lt $tries ]] && log "attempt $i/$tries failed (expired CDN links?) — resuming"
+        if [[ $i -lt $tries ]]; then
+            log "attempt $i/$tries failed (expired links or network drop) — retrying in ${delay}s"
+            sleep "$delay"
+            delay=$(( delay * 2 )); [[ $delay -gt 300 ]] && delay=300
+        fi
     done
     log "FAILED $repo after $tries attempts — not stamping; re-run to resume"
     return 1
