@@ -88,26 +88,18 @@ hf_download() {
     # pass's completed files: lab02's shards went 3.7 -> 7.5 -> 10 -> 6.0 -> 4.2 GB
     # and two completed 1.9 GB shards came back as ~36 MB.
     #
-    # So: park completed files outside the download dir before each pass and put
-    # them back afterwards. hfd then sees them as missing (it re-lists, but the
-    # manifest sizes match what we restore) and never deletes them.
+    # DO NOT try to work around this by parking completed files elsewhere before
+    # each pass. That was tried and made things worse: a partial file also has
+    # no .aria2 companion between aria2c runs, so partials get parked too, hfd
+    # restarts them from zero, and the restore overwrites a 1.7 GB shard with a
+    # 2 MB one. The right fix is to stop using hfd for HF repos — see
+    # docs/superpowers/plans/2026-08-02-download-status.md.
     local tries="${HCIE_HF_TRIES:-8}" i delay="${HCIE_HF_DELAY:-30}"
-    local park="$dest/.hcie-done"
     for (( i = 1; i <= tries; i++ )); do
-        # Move finished files (no .aria2 companion) out of harm's way.
-        mkdir -p "$park"
-        while IFS= read -r f; do
-            [[ -e "$f.aria2" ]] && continue
-            mv "$f" "$park/" 2>/dev/null
-        done < <(find "$dest" -maxdepth 1 -type f ! -name '.*' 2>/dev/null)
-
         (cd "$MODELS" && "$HFD" "$repo" --tool aria2c -x "${HCIE_HF_CONN:-1}" --local-dir "$dest")
         local rc=$?
 
-        # Restore them before deciding whether we are done.
-        find "$park" -maxdepth 1 -type f -exec mv {} "$dest/" \; 2>/dev/null
-        rmdir "$park" 2>/dev/null
-
+        # Trust the absence of .aria2 files over hfd's exit code alone.
         if [[ $rc -eq 0 ]] && ! find "$dest" -maxdepth 1 -name '*.aria2' | grep -q .; then
             touch "$dest/.hcie-complete"
             return 0

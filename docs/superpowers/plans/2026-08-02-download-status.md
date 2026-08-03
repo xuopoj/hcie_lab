@@ -4,15 +4,52 @@
 **Hosts:** Apple Silicon Mac (Docker Desktop) and a WSL2 machine
 **Purpose:** where the asset download stands, what is fixed, and what to retry next.
 
-## Summary
+## Summary (as of 2026-08-03)
 
 | Item | Status |
 |---|---|
 | Container-layer download bug | **Fixed**, pushed as `91ba63e` |
-| lab01 assets | **Downloaded**, packaged (53 MB zip) |
-| lab02 assets | **In progress** — see "CDN 403s" below |
-| lab03–lab10 assets | Queued behind lab02 in `07-package-all.sh` |
-| WSL `hfd` failure | **Open** — bypassed by packaging on the Mac |
+| lab01 | **Packaged** — 53 MB zip, verified |
+| lab06 | **Assets complete** (39 GB), packaging |
+| lab02 | 11 GB of 13 GB staged, HF weights incomplete |
+| lab03, lab04, lab05, lab07 | Barely started (39–193 MB each) |
+| lab08, lab09, lab10 | Not started |
+| WSL `hfd` failure | Open — bypassed by packaging on the Mac |
+
+**Nothing is running.** All processes were stopped after the hfd problem below.
+
+## STOP: hfd is unsuitable for large repos over an unreliable link
+
+`hfd.sh` deletes any needed file that has no `.aria2` control file, on the
+theory that `-c` cannot repair it (hfd.sh ~line 275, and its own comment says
+so). But **aria2c removes the control file exactly when a file completes**. So
+on every retry pass hfd sees the previous pass's finished shards as
+unrepairable and deletes them.
+
+On a repo too large to finish in one pass this can never converge. lab02's
+12.5 GB chatglm2-6b cycled 3.7 → 7.5 → 10 → 6.0 → 4.2 GB, with completed
+1.9 GB shards reappearing at ~36 MB.
+
+**Do not attempt another workaround inside hf_download.** An attempt to park
+completed files in `.hcie-done` before each pass made things worse: partial
+files also lack a `.aria2` companion between runs, so they were parked too,
+hfd restarted them from zero, and the restore step would have overwritten
+1.3 GB and 1.7 GB shards with 2 MB ones. That change is reverted.
+
+### Recommended: stop using hfd for HF repos
+
+Only 9 HF repos across 5 labs use it (lab02, lab03, lab04, lab07, lab08).
+lab01, lab05, lab06, lab09 and lab10 use OBS/git and work fine — which is why
+lab06's 39 GB downloaded cleanly.
+
+1. **Pull from ModelScope instead.** `THUDM/chatglm2-6b`,
+   `baichuan-inc/Baichuan2-7B-Chat`/`-Base` and the LLaVA/vicuna models all
+   exist there. Removes the failing component instead of patching it, and is
+   far faster from within China.
+2. **Or use `huggingface-cli download`** — official client, proper resume, no
+   destructive cleanup.
+
+Option 1 is preferred.
 
 ## Route change (2026-08-02)
 
